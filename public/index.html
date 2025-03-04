@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>家庭文件传输</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-3xl font-bold text-center mb-8">家庭文件传输</h1>
+        
+        <!-- 文件上传区域 -->
+        <div id="dropZone" class="border-2 border-dashed border-gray-300 rounded-lg p-8 mb-8 text-center"
+             ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)">
+            <div class="text-gray-500 mb-4">拖拽文件到此处或点击上传</div>
+            <input type="file" id="fileInput" class="hidden" onchange="handleFileSelect(event)">
+            <button onclick="document.getElementById('fileInput').click()"
+                    class="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded">
+                选择文件
+            </button>
+        </div>
+
+        <!-- 文件列表 -->
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold">文件列表</h2>
+                <button onclick="loadFiles()" class="bg-gray-100 hover:bg-gray-200 text-gray-600 p-2 rounded-full">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd" />
+                    </svg>
+                </button>
+            </div>
+            <div id="fileList" class="space-y-4"></div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const dropZone = document.getElementById('dropZone');
+        const fileList = document.getElementById('fileList');
+
+        // 添加连接状态显示
+        const connectionStatus = document.createElement('div');
+        connectionStatus.className = 'fixed top-4 right-4 px-4 py-2 rounded-full text-sm font-medium';
+        document.body.appendChild(connectionStatus);
+
+        function updateConnectionStatus(connected) {
+            connectionStatus.className = `fixed top-4 right-4 px-4 py-2 rounded-full text-sm font-medium ${connected ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`;
+            connectionStatus.textContent = connected ? '已连接' : '未连接';
+        }
+
+        // 监听连接状态
+        socket.on('connect', () => {
+            console.log('已连接到服务器');
+            updateConnectionStatus(true);
+        });
+
+        socket.on('disconnect', () => {
+            console.log('与服务器断开连接');
+            updateConnectionStatus(false);
+        });
+
+        // 加载文件列表
+        async function loadFiles() {
+            try {
+                const response = await fetch('/api/files');
+                const files = await response.json();
+                updateFileList(files);
+            } catch (error) {
+                console.error('加载文件列表失败:', error);
+            }
+        }
+
+        // 更新文件列表显示
+        function updateFileList(files) {
+            fileList.innerHTML = files.map(file => `
+                <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                    <div class="flex-1">
+                        <div class="font-medium">${file.name}</div>
+                        <div class="text-sm text-gray-500">
+                            大小: ${formatFileSize(file.size)}
+                            <span class="mx-2">|</span>
+                            上传时间: ${new Date(file.createTime).toLocaleString()}
+                        </div>
+                    </div>
+                    <div class="flex space-x-2">
+                        <button onclick="downloadFile('${file.name}')"
+                                class="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded">
+                            下载
+                        </button>
+                        <button onclick="deleteFile('${file.name}');"
+                                class="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded">
+                            删除
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // 文件大小格式化
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // 文件拖拽处理
+        function handleDragOver(event) {
+            event.preventDefault();
+            dropZone.classList.add('bg-gray-100');
+        }
+
+        function handleDragLeave(event) {
+            event.preventDefault();
+            dropZone.classList.remove('bg-gray-100');
+        }
+
+        function handleDrop(event) {
+            event.preventDefault();
+            dropZone.classList.remove('bg-gray-100');
+            const files = event.dataTransfer.files;
+            if (files.length > 0) {
+                uploadFile(files[0]);
+            }
+        }
+
+        // 文件选择处理
+        function handleFileSelect(event) {
+            const files = event.target.files;
+            if (files.length > 0) {
+                uploadFile(files[0]);
+            }
+        }
+
+        // 文件上传
+        async function uploadFile(file) {
+            const chunkSize = 2 * 1024 * 1024; // 2MB分片大小
+            const totalChunks = Math.ceil(file.size / chunkSize);
+            const identifier = `${file.name}-${file.size}-${file.lastModified}`;
+
+            // 获取已上传的分片
+            const progressResponse = await fetch(`/api/upload/progress/${identifier}`);
+            const progress = await progressResponse.json();
+            const uploadedChunks = new Set(progress.uploadedChunks);
+
+            // 创建进度条
+            const progressBar = document.createElement('div');
+            progressBar.className = 'w-full h-2 bg-gray-200 rounded-full mt-2';
+            const progressInner = document.createElement('div');
+            progressInner.className = 'h-full bg-blue-500 rounded-full transition-all duration-300';
+            progressBar.appendChild(progressInner);
+            dropZone.appendChild(progressBar);
+
+            try {
+                // 上传所有分片
+                for (let chunkNumber = 1; chunkNumber <= totalChunks; chunkNumber++) {
+                    if (uploadedChunks.has(chunkNumber)) continue;
+
+                    const start = (chunkNumber - 1) * chunkSize;
+                    const end = Math.min(start + chunkSize, file.size);
+                    const chunk = file.slice(start, end);
+
+                    const formData = new FormData();
+                    formData.append('chunk', chunk);
+                    formData.append('chunkNumber', chunkNumber);
+                    formData.append('totalChunks', totalChunks);
+                    formData.append('identifier', identifier);
+                    formData.append('filename', file.name);
+
+                    const response = await fetch('/api/upload/chunk', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('分片上传失败');
+                    }
+
+                    const result = await response.json();
+                    if (result.error) {
+                        throw new Error(result.error);
+                    }
+
+                    // 更新进度条
+                    const percent = ((uploadedChunks.size + 1) / totalChunks) * 100;
+                    progressInner.style.width = `${percent}%`;
+                    uploadedChunks.add(chunkNumber);
+
+                    // 检查是否是最后一个分片，且上传完成
+                    if (result.message === '文件上传完成') {
+                        console.log('文件上传成功');
+                        dropZone.removeChild(progressBar);
+                        return;
+                    }
+                }
+
+                // 如果所有分片都上传成功但没有收到完成消息，可能是最后一个分片
+                if (uploadedChunks.size === totalChunks) {
+                    console.log('文件上传成功');
+                    dropZone.removeChild(progressBar);
+                    return;
+                }
+
+                console.log('所有分片上传成功');
+                dropZone.removeChild(progressBar);
+            } catch (error) {
+                console.error('上传出错:', error);
+                alert('上传失败，您可以稍后继续上传');
+                dropZone.removeChild(progressBar);
+            }
+        }
+
+        // 文件下载
+        function downloadFile(filename) {
+            window.location.href = `/api/download/${filename}`;
+        }
+
+        // 文件删除
+        async function deleteFile(filename) {
+            if (!confirm('确定要删除这个文件吗？')) return;
+
+            try {
+                const response = await fetch(`/api/files/${filename}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    console.log('文件删除成功');
+                } else {
+                    const error = await response.json();
+                    alert(error.error || '删除失败');
+                }
+            } catch (error) {
+                console.error('删除出错:', error);
+                alert('删除失败');
+            }
+        }
+
+        // WebSocket事件处理
+        socket.on('fileUploaded', (file) => {
+            loadFiles();
+        });
+
+        socket.on('fileDeleted', (data) => {
+            loadFiles();
+        });
+
+        // 初始加载文件列表
+        loadFiles();
+    </script>
+</body>
+</html>
